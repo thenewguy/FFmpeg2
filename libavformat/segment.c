@@ -163,20 +163,8 @@ static int seg_write_header(AVFormatContext *s)
     oc->streams = s->streams;
     oc->nb_streams = s->nb_streams;
 
-    if (av_get_frame_filename(oc->filename, sizeof(oc->filename),
-                              s->filename, seg->number++) < 0) {
-        ret = AVERROR(EINVAL);
+    if ((ret = segment_start(s)) < 0)
         goto fail;
-    }
-
-    if ((ret = avio_open2(&oc->pb, oc->filename, AVIO_FLAG_WRITE,
-                          &s->interrupt_callback, NULL)) < 0)
-        goto fail;
-
-    if ((ret = avformat_write_header(oc, NULL)) < 0) {
-        avio_close(oc->pb);
-        goto fail;
-    }
 
     if (seg->list) {
         avio_printf(seg->pb, "%s", oc->filename);
