@@ -43,6 +43,7 @@ typedef struct {
     int64_t recording_time;
     int has_video;
     AVIOContext *pb;
+    double start_time, end_time;
 } SegmentContext;
 
 static int segment_start(AVFormatContext *s)
@@ -109,7 +110,7 @@ static int segment_end(AVFormatContext *s)
                                   &s->interrupt_callback, NULL)) < 0)
                 goto end;
         }
-        avio_printf(seg->pb, "%s\n", oc->filename);
+        avio_printf(seg->pb, "%s,%f,%f\n", oc->filename, seg->start_time, seg->end_time);
         avio_flush(seg->pb);
     }
 
@@ -220,6 +221,10 @@ static int seg_write_packet(AVFormatContext *s, AVPacket *pkt)
 
         if (ret)
             goto fail;
+        seg->start_time = (double)pkt->pts * av_q2d(st->time_base);
+    } else if (pkt->pts != AV_NOPTS_VALUE) {
+        seg->end_time = FFMAX(seg->end_time,
+                              (double)(pkt->pts + pkt->duration) * av_q2d(st->time_base));
     }
 
     ret = oc->oformat->write_packet(oc, pkt);
