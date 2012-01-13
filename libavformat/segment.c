@@ -79,6 +79,17 @@ static int segment_start(AVFormatContext *s)
         goto fail;
     }
 
+    if (seg->list) {
+        if (seg->list_size && !(seg->number % seg->list_size)) {
+            avio_close(seg->pb);
+            if ((err = avio_open2(&seg->pb, seg->list, AVIO_FLAG_WRITE,
+                                  &s->interrupt_callback, NULL)) < 0)
+                goto fail;
+        }
+        avio_printf(seg->pb, "%s", oc->filename);
+        avio_flush(seg->pb);
+    }
+
     return 0;
 
 fail:
@@ -166,11 +177,6 @@ static int seg_write_header(AVFormatContext *s)
     if ((ret = segment_start(s)) < 0)
         goto fail;
 
-    if (seg->list) {
-        avio_printf(seg->pb, "%s", oc->filename);
-        avio_flush(seg->pb);
-    }
-
 fail:
     if (ret) {
         if (oc) {
@@ -208,16 +214,6 @@ static int seg_write_packet(AVFormatContext *s, AVPacket *pkt)
         if (ret)
             goto fail;
 
-        if (seg->list) {
-            avio_printf(seg->pb, "%s", oc->filename);
-            avio_flush(seg->pb);
-            if (seg->list_size && !(seg->number % seg->list_size)) {
-                avio_close(seg->pb);
-                if ((ret = avio_open2(&seg->pb, seg->list, AVIO_FLAG_WRITE,
-                                      &s->interrupt_callback, NULL)) < 0)
-                    goto fail;
-            }
-        }
         seg->start_time = (double)pkt->pts * av_q2d(st->time_base);
     } else if (pkt->pts != AV_NOPTS_VALUE) {
         seg->end_time = FFMAX(seg->end_time,
