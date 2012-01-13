@@ -43,6 +43,7 @@ typedef struct {
     int64_t recording_time;
     int has_video;
     AVIOContext *pb;
+    double start_time, end_time;
 } SegmentContext;
 
 static int segment_start(AVFormatContext *s)
@@ -101,6 +102,11 @@ static int segment_end(AVFormatContext *s)
     if (ret < 0)
         av_log(s, AV_LOG_ERROR, "Failure occurred when ending segment '%s'\n",
                oc->filename);
+
+    if (seg->list) {
+        avio_printf(seg->pb, ",%f,%f\n", seg->start_time, seg->end_time);
+        avio_flush(seg->pb);
+    }
 
     avio_close(oc->pb);
     if (oc->oformat->priv_class)
@@ -173,7 +179,7 @@ static int seg_write_header(AVFormatContext *s)
     }
 
     if (seg->list) {
-        avio_printf(seg->pb, "%s\n", oc->filename);
+        avio_printf(seg->pb, "%s", oc->filename);
         avio_flush(seg->pb);
     }
 
@@ -215,7 +221,7 @@ static int seg_write_packet(AVFormatContext *s, AVPacket *pkt)
             goto fail;
 
         if (seg->list) {
-            avio_printf(seg->pb, "%s\n", oc->filename);
+            avio_printf(seg->pb, "%s", oc->filename);
             avio_flush(seg->pb);
             if (seg->size && !(seg->number % seg->size)) {
                 avio_close(seg->pb);
@@ -224,6 +230,10 @@ static int seg_write_packet(AVFormatContext *s, AVPacket *pkt)
                     goto fail;
             }
         }
+        seg->start_time = (double)pkt->pts * av_q2d(st->time_base);
+    } else if (pkt->pts != AV_NOPTS_VALUE) {
+        seg->end_time = FFMAX(seg->end_time,
+                              (double)(pkt->pts + pkt->duration) * av_q2d(st->time_base));
     }
 
     ret = oc->oformat->write_packet(oc, pkt);
