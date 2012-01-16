@@ -39,11 +39,53 @@ typedef struct {
     int   list_size;       ///< number of entries for the segment list file
     float time;            ///< segment duration
     int  wrap;             ///< number after which the index wraps
+    char *times_str;       ///< segment times specification string
+    int64_t *times;        ///< list of segment interval specification
+    int nb_times;          ///< number of elments in the times array
     int64_t recording_time;
     int has_video;
     AVIOContext *pb;
     double start_time, end_time;
 } SegmentContext;
+
+static int parse_times(void *log_ctx, int64_t **times, int *nb_times,
+                       const char *times_str)
+{
+    const char *p;
+    int i, ret;
+    *nb_times = 1;
+
+    for (p = times_str; *p; p++)
+        if (*p == ',')
+            (*nb_times)++;
+
+    *times = av_realloc_f(NULL, sizeof(**times), *nb_times);
+    if (!*times) {
+        av_log(log_ctx, AV_LOG_ERROR, "Could not allocate forced times array.\n");
+        return AVERROR(ENOMEM);
+    }
+
+    for (i = 0; i < *nb_times; i++) {
+        int64_t t;
+        p = i ? strchr(p, ',') + 1 : times_str;
+        ret = av_parse_time(&t, p, 1);
+        if (ret < 0) {
+            av_log(log_ctx, AV_LOG_ERROR,
+                   "Invalid time duration specification in %s.\n", p);
+            return AVERROR(EINVAL);
+        }
+        (*times)[i] = t;
+
+        /* check on monotonicity */
+        if (i && (*times)[i-1] > (*times)[i]) {
+            av_log(log_ctx, AV_LOG_ERROR,
+                   "Specified time %f is greater than the following time %f\n",
+                   (float)((*times)[i])/1000000, (float)((*times)[i-1])/1000000);
+            return AVERROR(EINVAL);
+        }
+    }
+    return 0;
+}
 
 static int segment_start(AVFormatContext *s)
 {
@@ -136,9 +178,13 @@ static int seg_write_header(AVFormatContext *s)
     seg->recording_time = seg->time * 1000000;
 
     oc = avformat_alloc_context();
-
     if (!oc)
         return AVERROR(ENOMEM);
+
+    if (seg->times_str) {
+        if ((ret = parse_times(s, &seg->times, &seg->nb_times, seg->times_str)) < 0)
+            return ret;
+    }
 
     if (seg->list)
         if ((ret = avio_open2(&seg->pb, seg->list, AVIO_FLAG_WRITE,
@@ -193,8 +239,14 @@ static int seg_write_packet(AVFormatContext *s, AVPacket *pkt)
     SegmentContext *seg = s->priv_data;
     AVFormatContext *oc = seg->avf;
     AVStream *st = oc->streams[pkt->stream_index];
-    int64_t end_pts = seg->recording_time * seg->number;
+    int64_t end_pts;
     int ret;
+
+    if (seg->times) {
+        end_pts = seg->number <= seg->nb_times ? seg->times[seg->number-1] : INT64_MAX;
+    } else {
+        end_pts = seg->recording_time * seg->number;
+    }
 
     /* if the segment has video, *only* start a new segment with a key video frame */
     if (((seg->has_video && st->codec->codec_type == AVMEDIA_TYPE_VIDEO) || !seg->has_video) &&
@@ -235,6 +287,9 @@ static int seg_write_trailer(struct AVFormatContext *s)
     int ret = segment_end(s);
     if (seg->list)
         avio_close(seg->pb);
+
+    av_freep(&seg->times_str);
+    av_freep(&seg->times);
     oc->streams = NULL;
     oc->nb_streams = 0;
     avformat_free_context(oc);
@@ -246,6 +301,7 @@ static int seg_write_trailer(struct AVFormatContext *s)
 static const AVOption options[] = {
     { "segment_format",    "set container format used for the segments", OFFSET(format),  AV_OPT_TYPE_STRING, {.str = NULL},  0, 0,       E },
     { "segment_time",      "set segment length in seconds",              OFFSET(time),    AV_OPT_TYPE_FLOAT,  {.dbl = 2},     0, FLT_MAX, E },
+    { "segment_times",     "set segment split points in seconds",        OFFSET(times_str), AV_OPT_TYPE_STRING, {.str = NULL}, 0, 0,      E },
     { "segment_list",      "output the segment list",                    OFFSET(list),    AV_OPT_TYPE_STRING, {.str = NULL},  0, 0,       E },
     { "segment_list_size", "set the maximum number of playlist entries", OFFSET(list_size), AV_OPT_TYPE_INT,  {.dbl = 0},     0, INT_MAX, E },
     { "segment_wrap",      "number after which the index wraps",         OFFSET(wrap),    AV_OPT_TYPE_INT,    {.dbl = 0},     0, INT_MAX, E },
