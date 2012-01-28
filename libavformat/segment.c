@@ -38,14 +38,14 @@ typedef struct {
     char *list;            ///< filename for the segment list file
     int   list_size;       ///< number of entries for the segment list file
     AVIOContext *list_pb;  ///< list file put-byte context
-    float time;            ///< segment duration
     int  wrap;             ///< number after which the index wraps
+    char *time_str;        ///< segment duration specification string
+    int64_t time;          ///< segment duration
     char *times_str;       ///< segment times specification string
     int64_t *times;        ///< list of segment interval specification
     char *delta_str;       ///< approximation value (in seconds) used for the segment times
     int64_t delta;
     int nb_times;          ///< number of elments in the times array
-    int64_t recording_time;
     int has_video;
     double start_time, end_time;
 } SegmentContext;
@@ -176,7 +176,6 @@ static int seg_write_header(AVFormatContext *s)
     int ret, i;
 
     seg->number = 0;
-    seg->recording_time = seg->time * 1000000;
 
     oc = avformat_alloc_context();
     if (!oc)
@@ -185,6 +184,15 @@ static int seg_write_header(AVFormatContext *s)
     if (seg->times_str) {
         if ((ret = parse_times(s, &seg->times, &seg->nb_times, seg->times_str)) < 0)
             return ret;
+    }
+
+    if (seg->time_str) {
+        if ((ret = av_parse_time(&seg->time, seg->time_str, 1)) < 0) {
+            av_log(s, AV_LOG_ERROR,
+                   "Invalid time duration specification '%s' for time option\n",
+                   seg->time_str);
+            return ret;
+        }
     }
 
     if (seg->delta_str) {
@@ -268,7 +276,7 @@ static int seg_write_packet(AVFormatContext *s, AVPacket *pkt)
     if (seg->times) {
         end_pts = seg->number <= seg->nb_times ? seg->times[seg->number-1] : INT64_MAX;
     } else {
-        end_pts = seg->recording_time * seg->number;
+        end_pts = seg->time * seg->number;
     }
 
     /* if the segment has video, *only* start a new segment with a key video frame */
@@ -309,6 +317,7 @@ static int seg_write_trailer(struct AVFormatContext *s)
         avio_close(seg->list_pb);
 
     av_freep(&seg->delta_str);
+    av_freep(&seg->time_str);
     av_freep(&seg->times_str);
     av_freep(&seg->times);
     oc->streams = NULL;
@@ -322,7 +331,7 @@ static int seg_write_trailer(struct AVFormatContext *s)
 static const AVOption options[] = {
     { "segment_delta",     "set approximation value (in seconds) used for the segment times", OFFSET(delta_str), AV_OPT_TYPE_STRING, {.str = NULL}, 0, 0, E },
     { "segment_format",    "set container format used for the segments", OFFSET(format),  AV_OPT_TYPE_STRING, {.str = NULL},  0, 0,       E },
-    { "segment_time",      "set segment length in seconds",              OFFSET(time),    AV_OPT_TYPE_FLOAT,  {.dbl = 2},     0, FLT_MAX, E },
+    { "segment_time",      "set segment length in seconds",              OFFSET(time_str), AV_OPT_TYPE_STRING,  {.str = "2"},  0, 0,      E },
     { "segment_times",     "set segment split points in seconds",        OFFSET(times_str), AV_OPT_TYPE_STRING, {.str = NULL}, 0, 0,      E },
     { "segment_list",      "output the segment list",                    OFFSET(list),    AV_OPT_TYPE_STRING, {.str = NULL},  0, 0,       E },
     { "segment_list_size", "set the maximum number of playlist entries", OFFSET(list_size), AV_OPT_TYPE_INT,  {.dbl = 0},     0, INT_MAX, E },
