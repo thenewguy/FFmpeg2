@@ -267,8 +267,7 @@ static int seg_write_packet(AVFormatContext *s, AVPacket *pkt)
     if (((seg->has_video && st->codec->codec_type == AVMEDIA_TYPE_VIDEO) || !seg->has_video) &&
         av_compare_ts(pkt->pts, st->time_base, end_pts-seg->delta, AV_TIME_BASE_Q) >= 0 &&
         pkt->flags & AV_PKT_FLAG_KEY) {
-
-        av_log(s, AV_LOG_DEBUG, "Next segment starts with packet stream:%d pts:%"PRId64" pts_time:%f\n",
+        av_log(s, AV_LOG_INFO, "Next segment starts with packet stream:%d pts:%"PRId64" pts_time:%f\n",
                pkt->stream_index, pkt->pts, pkt->pts * av_q2d(st->time_base));
 
         if ((ret = segment_end(s)) < 0 || (ret = segment_start(s)) < 0)
