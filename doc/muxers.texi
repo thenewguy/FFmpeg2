@@ -442,6 +442,17 @@ segment start and end time expressed in seconds.
 
 The muxer supports the following options:
 @table @option
+@item segment_delta @var{delta}
+Specify the accuracy in seconds when selecting the start time for a
+segment. Default value is 0.
+
+This is especially useful with video segments, which are split at GOP
+boundaries. When delta is specified a given key-frame is selected if
+its PTS satisfies the relation:
+@example
+PTS >= start_time - delta
+@end example
+
 @item segment_format @var{format}
 Override the inner container format, by default it is guessed by the filename
 extension.

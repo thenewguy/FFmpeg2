@@ -42,6 +42,8 @@ typedef struct {
     int  wrap;             ///< number after which the index wraps
     char *times_str;       ///< segment times specification string
     int64_t *times;        ///< list of segment interval specification
+    char *delta_str;       ///< approximation value (in seconds) used for the segment times
+    int64_t delta;
     int nb_times;          ///< number of elments in the times array
     int64_t recording_time;
     int has_video;
@@ -185,6 +187,15 @@ static int seg_write_header(AVFormatContext *s)
             return ret;
     }
 
+    if (seg->delta_str) {
+        if ((ret = av_parse_time(&seg->delta, seg->delta_str, 1)) < 0) {
+            av_log(s, AV_LOG_ERROR,
+                   "Invalid time duration specification '%s' for delta option\n",
+                   seg->delta_str);
+            return ret;
+        }
+    }
+
     if (seg->list)
         if ((ret = avio_open2(&seg->list_pb, seg->list, AVIO_FLAG_WRITE,
                               &s->interrupt_callback, NULL)) < 0)
@@ -262,8 +273,7 @@ static int seg_write_packet(AVFormatContext *s, AVPacket *pkt)
 
     /* if the segment has video, *only* start a new segment with a key video frame */
     if (((seg->has_video && st->codec->codec_type == AVMEDIA_TYPE_VIDEO) || !seg->has_video) &&
-        av_compare_ts(pkt->pts, st->time_base,
-                      end_pts, AV_TIME_BASE_Q) >= 0 &&
+        av_compare_ts(pkt->pts, st->time_base, end_pts-seg->delta, AV_TIME_BASE_Q) >= 0 &&
         pkt->flags & AV_PKT_FLAG_KEY) {
 
         av_log(s, AV_LOG_DEBUG, "Next segment starts with packet stream:%d pts:%"PRId64" pts_time:%f\n",
@@ -299,6 +309,7 @@ static int seg_write_trailer(struct AVFormatContext *s)
     if (seg->list)
         avio_close(seg->list_pb);
 
+    av_freep(&seg->delta_str);
     av_freep(&seg->times_str);
     av_freep(&seg->times);
     oc->streams = NULL;
@@ -310,6 +321,7 @@ static int seg_write_trailer(struct AVFormatContext *s)
 #define OFFSET(x) offsetof(SegmentContext, x)
 #define E AV_OPT_FLAG_ENCODING_PARAM
 static const AVOption options[] = {
+    { "segment_delta",     "set approximation value (in seconds) used for the segment times", OFFSET(delta_str), AV_OPT_TYPE_STRING, {.str = NULL}, 0, 0, E },
     { "segment_format",    "set container format used for the segments", OFFSET(format),  AV_OPT_TYPE_STRING, {.str = NULL},  0, 0,       E },
     { "segment_time",      "set segment length in seconds",              OFFSET(time),    AV_OPT_TYPE_FLOAT,  {.dbl = 2},     0, FLT_MAX, E },
     { "segment_times",     "set segment split points in seconds",        OFFSET(times_str), AV_OPT_TYPE_STRING, {.str = NULL}, 0, 0,      E },
